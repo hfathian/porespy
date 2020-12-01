@@ -6,6 +6,9 @@ from scipy import ndimage as spim
 from porespy.tools import sanitize_filename
 from porespy.networks import generate_voxel_image
 from pyevtk.hl import imageToVTK
+import imageio
+from paraview.simple import *
+import subprocess
 
 
 def dict_to_vtk(data, filename, voxel_size=1, origin=(0, 0, 0)):
@@ -290,3 +293,141 @@ def _save_stl(im, vs, filename):
         for j in range(3):
             export.vectors[i][j] = vertices[f[j], :]
     export.save(f"{filename}.stl")
+    
+    
+def to_paraview(im, filename, range=[0,1]):
+    
+    r"""
+    Converts an array to a paraview state file
+
+    Parameters
+    ----------
+    im : 2D or 3D image
+        The image of the porous material
+
+    filename : string
+        Path to output file
+
+    range: list
+        The desired threshhold of the image in [a,b] 
+        where a is the lower limit and b is the upper limit. 
+        The default value is [0,1]
+    Notes
+    -----
+    Outputs an pvsm file that can opened in Paraview
+    
+    """
+    data=im.astype('uint8')
+    path=filename+'.tiff'
+    if len(im.shape)==2:
+         imageio.imwrite(path, np.array(data))
+         mode='2D'
+         view='Slice'
+         zshape=0
+         xshape=im.shape[1]
+         yshape=im.shape[0]
+    elif len(im.shape)==3:
+         imageio.mimsave(path, np.array(data))
+         mode='2D'
+         view='Volume'
+         zshape=im.shape[0]
+         xshape=im.shape[2]
+         yshape=im.shape[1]
+   
+    
+    # find image shape
+    #xshape=im.shape[1]
+   # yshape=im.shape[0]
+    
+    maxshape=max(xshape,yshape)
+    
+    
+    paraview.simple._DisableFirstRenderCameraReset()
+
+    # create a new 'TIFF Series Reader'
+    dtiff = TIFFSeriesReader(FileNames=[path])
+    
+    # get active view
+    renderView1 = GetActiveViewOrCreate('RenderView')
+    # uncomment following to set a specific view size
+    # renderView1.ViewSize = [1612, 552]
+    
+    # get layout
+    layout1 = GetLayout()
+    
+    # show data in view
+    dtiffDisplay = Show(dtiff, renderView1, 'UniformGridRepresentation')
+    
+    # get color transfer function/color map for 'TiffScalars'
+    tiffScalarsLUT = GetColorTransferFunction('TiffScalars')
+    
+    # get opacity transfer function/opacity map for 'TiffScalars'
+    tiffScalarsPWF = GetOpacityTransferFunction('TiffScalars')
+    
+    # trace defaults for the display properties.
+    dtiffDisplay.Representation = view
+    dtiffDisplay.ColorArrayName = ['POINTS', 'Tiff Scalars']
+    dtiffDisplay.LookupTable = tiffScalarsLUT
+    dtiffDisplay.OSPRayScaleArray = 'Tiff Scalars'
+    dtiffDisplay.OSPRayScaleFunction = 'PiecewiseFunction'
+    dtiffDisplay.SelectOrientationVectors = 'None'
+    dtiffDisplay.ScaleFactor = maxshape/10-.1
+    dtiffDisplay.SelectScaleArray = 'Tiff Scalars'
+    dtiffDisplay.GlyphType = 'Arrow'
+    dtiffDisplay.GlyphTableIndexArray = 'Tiff Scalars'
+    dtiffDisplay.GaussianRadius = maxshape/200-0.005
+    dtiffDisplay.SetScaleArray = ['POINTS', 'Tiff Scalars']
+    dtiffDisplay.ScaleTransferFunction = 'PiecewiseFunction'
+    dtiffDisplay.OpacityArray = ['POINTS', 'Tiff Scalars']
+    dtiffDisplay.OpacityTransferFunction = 'PiecewiseFunction'
+    dtiffDisplay.DataAxesGrid = 'GridAxesRepresentation'
+    dtiffDisplay.PolarAxes = 'PolarAxesRepresentation'
+    dtiffDisplay.ScalarOpacityUnitDistance = 8.256564094912507
+    dtiffDisplay.ScalarOpacityFunction = tiffScalarsPWF
+    dtiffDisplay.IsosurfaceValues = [0.5]
+    dtiffDisplay.SliceFunction = 'Plane'
+    
+    
+    
+    # init the 'Plane' selected for 'SliceFunction'
+    dtiffDisplay.SliceFunction.Origin = [xshape/2-.5, yshape/2-.5, zshape/2-.5]
+    
+    # reset view to fit data
+    renderView1.ResetCamera()
+    
+    #changing interaction mode based on data extents
+    #renderView1.InteractionMode = mode
+    renderView1.CameraPosition = [xshape/2-.5, yshape/2-.5, 4.6*((xshape/2-.5)**2+(yshape/2-.5)**2+(zshape/2-.5)**2)**0.5]
+    renderView1.CameraFocalPoint = [xshape/2-.5, yshape/2-.5, zshape/2-.5]
+    
+    # get the material library
+    materialLibrary1 = GetMaterialLibrary()
+    
+    # show color bar/color legend
+    dtiffDisplay.SetScalarBarVisibility(renderView1, True)
+    
+    # update the view to ensure updated data information
+    renderView1.Update()
+    
+    #### saving camera placements for all active views
+    
+    # current camera placement for renderView1
+    #renderView1.InteractionMode = mode
+    renderView1.CameraPosition = [xshape/2-0.5, yshape/2-.5, 4.6*(((xshape/2-.5)**2+(yshape/2-.5)**2+(zshape/2-.5)**2)**0.5)]
+    renderView1.CameraFocalPoint = [xshape/2-.5, yshape/2-.5, zshape/2-.5]
+    renderView1.CameraParallelScale = ((xshape/2-.5)**2+(yshape/2-.5)**2+(zshape/2-.5)**2)**0.5
+    
+    #### uncomment the following to render all views
+    #RenderAllViews()
+    # alternatively, if you want to write images, you can use SaveScreenshot(...).
+    threshold1 = Threshold(Input=dtiff)
+    threshold1.Scalars = ['POINTS', 'Tiff Scalars']
+    threshold1.ThresholdRange = range
+
+    # show data in view
+    threshold1Display = Show(threshold1, renderView1, 'UnstructuredGridRepresentation')    
+    
+    # hide data in view
+    Hide(dtiff, renderView1)
+    
+    SaveState(filename+'.pvsm')
