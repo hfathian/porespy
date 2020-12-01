@@ -431,3 +431,16 @@ def to_paraview(im, filename, range=[0,1]):
     Hide(dtiff, renderView1)
     
     SaveState(filename+'.pvsm')
+    
+def opn_paraview(filename):
+    r"""
+    open a paraview state file directly in paraview
+
+    Parameters
+    --------
+    filename : string
+        Path to input state file
+    """
+    statefile=filename+'.pvsm'
+    paraview_path="paraview.exe"
+    subprocess.Popen([paraview_path, statefile])
